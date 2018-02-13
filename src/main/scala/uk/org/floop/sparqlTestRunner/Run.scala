@@ -122,9 +122,9 @@ object Run extends App {
           val result = exec.execAsk()
           val timeTaken = (System.currentTimeMillis() - timeTestStart).toFloat / 1000
           testCases = testCases ++ <testcase name={comment} class={className} time={timeTaken.toString}>{
-            if (!result) {
+            if (result) {
               errors += 1
-              System.err.println(s"Testcase $comment\nExpected ASK query to return TRUE")
+              System.err.println(s"Testcase $comment\nExpected ASK query to return FALSE")
               <failure message={"Constraint violated"}/>
             }}</testcase>
         } else {
