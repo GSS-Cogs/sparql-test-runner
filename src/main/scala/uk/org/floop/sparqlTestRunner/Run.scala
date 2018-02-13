@@ -8,12 +8,12 @@ import org.apache.jena.query.{DatasetFactory, QueryExecutionFactory, QueryFactor
 import org.apache.jena.rdf.model.{Model, ModelFactory}
 import org.apache.jena.riot.RDFDataMgr
 
-import scala.collection.JavaConversions._
 import scala.io.Source
-import scala.xml.{NodeSeq, XML}
+import scala.xml.{NodeSeq, PrettyPrinter}
 
 case class Config(dir: File = new File("tests/sparql"),
                   report: File = new File("reports/TESTS-sparql-test-runner.xml"),
+                  ignoreFail: Boolean = false,
                   data: Seq[File] = Seq())
 
 object Run extends App {
@@ -26,6 +26,9 @@ object Run extends App {
     opt[File]('r', "report") optional() valueName "<report>" action { (x, c) =>
       c.copy(report = x)
     } text "file to output XML test report, defaults to reports/TESTS-sparql-test-runner.xml"
+    opt[Unit]('i', "ignorefail") optional() action { (_, c) =>
+      c.copy(ignoreFail = true)
+    } text "exit with success even if there are reported failures"
     arg[File]("<file>...") unbounded() required() action { (x, c) =>
       c.copy(data = c.data :+ x) } text "data to run the queries against"
   }
@@ -43,8 +46,11 @@ object Run extends App {
       for (dir <- Option(config.report.getParentFile)) {
         dir.mkdirs
       }
-      XML.save(config.report.toString, <testsuites>{results}</testsuites>, "UTF-8", true)
-      System.exit(error match {
+      val pp = new PrettyPrinter(80, 2)
+      val pw = new PrintWriter(config.report)
+      pw.write(pp.format(<testsuites>{results}</testsuites>))
+      pw.close
+      System.exit((error && !config.ignoreFail) match {
         case true => 1
         case false => 0
       })
@@ -107,18 +113,19 @@ object Run extends App {
                 if (nonEmptyResults) {
                   errors += 1
                   System.err.println(s"Testcase $comment\nExpected empty result set, got:\n${actualResults}")
-                    <error message={s"Expected empty result set, got:\n${actualResults}"}/>
+                    <failure message={s"Expected empty result set, got:\n${actualResults}"}/>
                 }
               }
             }
           </testcase>
         } else if (query.isAskType) {
-          var result = exec.execAsk()
+          val result = exec.execAsk()
           val timeTaken = (System.currentTimeMillis() - timeTestStart).toFloat / 1000
           testCases = testCases ++ <testcase name={comment} class={className} time={timeTaken.toString}>{
             if (!result) {
               errors += 1
               System.err.println(s"Testcase $comment\nExpected ASK query to return TRUE")
+              <failure message={"Constraint violated"}/>
             }}</testcase>
         } else {
           skipped += 1
@@ -134,7 +141,7 @@ object Run extends App {
     }
     val testSuiteTime = (System.currentTimeMillis() - timeSuiteStart - subSuiteTimes).toFloat / 1000
     val suiteName = {
-      val relativeName = root.relativize(dir.toPath).toString
+      val relativeName = root.getParent.relativize(dir.toPath).toString
       if (relativeName.length == 0) {
         "root"
       } else {
