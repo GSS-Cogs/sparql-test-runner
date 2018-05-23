@@ -1,6 +1,7 @@
 package uk.org.floop.sparqlTestRunner
 
 import java.io._
+import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 
@@ -13,7 +14,7 @@ import scala.xml.{NodeSeq, PrettyPrinter}
 
 case class Config(dir: File = new File("tests/sparql"),
                   report: File = new File("reports/TESTS-sparql-test-runner.xml"),
-                  ignoreFail: Boolean = false,
+                  ignoreFail: Boolean = false, endpoint: Option[URI] = None,
                   data: Seq[File] = Seq())
 
 object Run extends App {
@@ -29,20 +30,35 @@ object Run extends App {
     opt[Unit]('i', "ignorefail") optional() action { (_, c) =>
       c.copy(ignoreFail = true)
     } text "exit with success even if there are reported failures"
-    arg[File]("<file>...") unbounded() required() action { (x, c) =>
+    opt[URI]('s', name= "service") optional() valueName "<HTTP URI>" action { (x, c) =>
+      c.copy(endpoint = Some(x))
+    } text "SPARQL endpoint to run the queries against"
+    arg[File]("<file>...") unbounded() optional() action { (x, c) =>
       c.copy(data = c.data :+ x) } text "data to run the queries against"
+    checkConfig( c =>
+      if (c.endpoint.isDefined && !c.data.isEmpty) {
+        failure("Specify either a SPARQL endpoint or data files, not both.")
+      } else if (c.endpoint.isEmpty && c.data.isEmpty) {
+        failure("Must specify either a SPARQL endpoint or some data files.")
+      } else success
+    )
   }
   parser.parse(args, Config()) match {
     case Some(config) =>
-      val dataset = DatasetFactory.create
-      for (d <- config.data) {
-        RDFDataMgr.read(dataset, d.toString)
+      val data = config.endpoint match {
+        case Some(uri) => Right(uri)
+        case None =>
+          val dataset = DatasetFactory.create
+          for (d <- config.data) {
+            RDFDataMgr.read(dataset, d.toString)
+          }
+          val union = ModelFactory.createDefaultModel
+          union.add(dataset.getDefaultModel)
+          union.add(dataset.getUnionModel)
+          dataset.close()
+          Left(union)
       }
-      val union = ModelFactory.createDefaultModel
-      union.add(dataset.getDefaultModel)
-      union.add(dataset.getUnionModel)
-      dataset.close()
-      val (error, results) = runTestsUnder(config.dir, union, config.dir.toPath)
+      val (error, results) = runTestsUnder(config.dir, data, config.dir.toPath)
       for (dir <- Option(config.report.getParentFile)) {
         dir.mkdirs
       }
@@ -57,7 +73,7 @@ object Run extends App {
     case None =>
   }
 
-  def runTestsUnder(dir: File, model: Model, root: Path): (Boolean, NodeSeq) = {
+  def runTestsUnder(dir: File, data: Either[Model, URI], root: Path): (Boolean, NodeSeq) = {
     var testSuites = NodeSeq.Empty
     var testCases = NodeSeq.Empty
     var overallError = false
@@ -69,7 +85,7 @@ object Run extends App {
     for (f <- dir.listFiles) yield {
       if (f.isDirectory) {
         val subSuiteStart = System.currentTimeMillis()
-        val (error, subSuites) = runTestsUnder(f, model, root)
+        val (error, subSuites) = runTestsUnder(f, data, root)
         testSuites ++= subSuites
         overallError |= error
         subSuiteTimes += (System.currentTimeMillis() - subSuiteStart)
@@ -90,7 +106,10 @@ object Run extends App {
         }
         tests += 1
         val query = QueryFactory.create(new String(Files.readAllBytes(f.toPath), StandardCharsets.UTF_8))
-        val exec = QueryExecutionFactory.create(query, model)
+        val exec = data match {
+          case Left(model) => QueryExecutionFactory.create(query, model)
+          case Right(uri) => QueryExecutionFactory.sparqlService(uri.toString, query)
+        }
         if (query.isSelectType) {
           var results = exec.execSelect()
           var nonEmptyResults = results.hasNext()
@@ -141,7 +160,7 @@ object Run extends App {
     }
     val testSuiteTime = (System.currentTimeMillis() - timeSuiteStart - subSuiteTimes).toFloat / 1000
     val suiteName = {
-      val relativeName = root.getParent.relativize(dir.toPath).toString
+      val relativeName = root.toAbsolutePath.getParent.relativize(dir.toPath).toString
       if (relativeName.length == 0) {
         "root"
       } else {
