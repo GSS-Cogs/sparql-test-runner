@@ -160,7 +160,7 @@ object Run extends App {
     }
     val testSuiteTime = (System.currentTimeMillis() - timeSuiteStart - subSuiteTimes).toFloat / 1000
     val suiteName = {
-      val relativeName = root.toAbsolutePath.getParent.relativize(dir.toPath).toString
+      val relativeName = root.toAbsolutePath.getParent.relativize(dir.toPath.toAbsolutePath).toString
       if (relativeName.length == 0) {
         "root"
       } else {
