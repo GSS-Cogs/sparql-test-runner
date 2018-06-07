@@ -6,8 +6,6 @@ version := "1.2"
 
 scalaVersion := "2.12.4"
 
-// scalacOptions += "-target:jvm-1.7"
-
 libraryDependencies ++= Seq(
   "org.apache.jena" % "jena-arq" % "3.6.0",
   "org.apache.jena" % "jena-cmds" % "3.6.0",

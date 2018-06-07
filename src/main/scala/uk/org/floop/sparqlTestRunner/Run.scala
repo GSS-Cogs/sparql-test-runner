@@ -5,8 +5,13 @@ import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 
-import org.apache.jena.query.{DatasetFactory, QueryExecutionFactory, QueryFactory, ResultSetFormatter}
-import org.apache.jena.rdf.model.{Model, ModelFactory}
+import org.apache.http.auth.{AuthScope, UsernamePasswordCredentials}
+import org.apache.http.client.protocol.HttpClientContext
+import org.apache.http.client.utils.URIUtils
+import org.apache.http.impl.auth.BasicScheme
+import org.apache.http.impl.client.{BasicAuthCache, BasicCredentialsProvider, HttpClients}
+import org.apache.jena.query._
+import org.apache.jena.rdf.model.ModelFactory
 import org.apache.jena.riot.RDFDataMgr
 
 import scala.io.Source
@@ -14,11 +19,11 @@ import scala.xml.{NodeSeq, PrettyPrinter}
 
 case class Config(dir: File = new File("tests/sparql"),
                   report: File = new File("reports/TESTS-sparql-test-runner.xml"),
-                  ignoreFail: Boolean = false, endpoint: Option[URI] = None,
+                  ignoreFail: Boolean = false, endpoint: Option[URI] = None, auth: Option[String] = None,
                   data: Seq[File] = Seq())
 
 object Run extends App {
-  val packageVersion: String = getClass.getPackage.getImplementationVersion()
+  val packageVersion: String = getClass.getPackage.getImplementationVersion
   val parser = new scopt.OptionParser[Config]("sparql-testrunner") {
     head("sparql-testrunner", packageVersion)
     opt[File]('t', "testdir") optional() valueName "<dir>" action { (x, c) =>
@@ -33,10 +38,15 @@ object Run extends App {
     opt[URI]('s', name= "service") optional() valueName "<HTTP URI>" action { (x, c) =>
       c.copy(endpoint = Some(x))
     } text "SPARQL endpoint to run the queries against"
+    opt[String]('a', "auth") optional() valueName "<user:pass>" action { (x, c) =>
+      c.copy(auth = Some(x))
+    } text "basic authentication username:password"
     arg[File]("<file>...") unbounded() optional() action { (x, c) =>
       c.copy(data = c.data :+ x) } text "data to run the queries against"
     checkConfig( c =>
-      if (c.endpoint.isDefined && !c.data.isEmpty) {
+      if (!c.dir.exists || !c.dir.isDirectory) {
+        failure("Tests directory (" + c.dir.toString + ") doesn't exist or isn't a directory.")
+      } else if (c.endpoint.isDefined && c.data.nonEmpty) {
         failure("Specify either a SPARQL endpoint or data files, not both.")
       } else if (c.endpoint.isEmpty && c.data.isEmpty) {
         failure("Must specify either a SPARQL endpoint or some data files.")
@@ -45,8 +55,27 @@ object Run extends App {
   }
   parser.parse(args, Config()) match {
     case Some(config) =>
-      val data = config.endpoint match {
-        case Some(uri) => Right(uri)
+      val queryExecution: Query => QueryExecution = config.endpoint match {
+        case Some(uri) =>
+          // Querying a remote endpoint; if authentication is required, need to set up pre-emptive auth,
+          // see https://hc.apache.org/httpcomponents-client-ga/tutorial/html/authentication.html
+          config.auth match {
+            case Some(userpass) =>
+              val target = URIUtils.extractHost(uri) // new HttpHost(uri.getHost, uri.getPort)
+              val credsProvider = new BasicCredentialsProvider()
+              credsProvider.setCredentials(
+                new AuthScope(target.getHostName, target.getPort),
+                new UsernamePasswordCredentials(userpass))
+              val authCache = new BasicAuthCache()
+              authCache.put(target, new BasicScheme())
+              val context = HttpClientContext.create()
+              context.setCredentialsProvider(credsProvider)
+              context.setAuthCache(authCache)
+              val client = HttpClients.custom.build()
+              (query: Query) => QueryExecutionFactory.sparqlService(uri.toString, query, client, context)
+            case None =>
+              (query: Query) => QueryExecutionFactory.sparqlService(uri.toString, query)
+          }
         case None =>
           val dataset = DatasetFactory.create
           for (d <- config.data) {
@@ -56,24 +85,21 @@ object Run extends App {
           union.add(dataset.getDefaultModel)
           union.add(dataset.getUnionModel)
           dataset.close()
-          Left(union)
+          (query: Query) => QueryExecutionFactory.create(query, union)
       }
-      val (error, results) = runTestsUnder(config.dir, data, config.dir.toPath)
+      val (error, results) = runTestsUnder(config.dir, queryExecution, config.dir.toPath)
       for (dir <- Option(config.report.getParentFile)) {
         dir.mkdirs
       }
       val pp = new PrettyPrinter(80, 2)
       val pw = new PrintWriter(config.report)
       pw.write(pp.format(<testsuites>{results}</testsuites>))
-      pw.close
-      System.exit((error && !config.ignoreFail) match {
-        case true => 1
-        case false => 0
-      })
+      pw.close()
+      System.exit(if (error && !config.ignoreFail) 1 else 0)
     case None =>
   }
 
-  def runTestsUnder(dir: File, data: Either[Model, URI], root: Path): (Boolean, NodeSeq) = {
+  def runTestsUnder(dir: File, queryExecution: Query => QueryExecution, root: Path): (Boolean, NodeSeq) = {
     var testSuites = NodeSeq.Empty
     var testCases = NodeSeq.Empty
     var overallError = false
@@ -85,7 +111,7 @@ object Run extends App {
     for (f <- dir.listFiles) yield {
       if (f.isDirectory) {
         val subSuiteStart = System.currentTimeMillis()
-        val (error, subSuites) = runTestsUnder(f, data, root)
+        val (error, subSuites) = runTestsUnder(f, queryExecution, root)
         testSuites ++= subSuites
         overallError |= error
         subSuiteTimes += (System.currentTimeMillis() - subSuiteStart)
@@ -106,13 +132,10 @@ object Run extends App {
         }
         tests += 1
         val query = QueryFactory.create(new String(Files.readAllBytes(f.toPath), StandardCharsets.UTF_8))
-        val exec = data match {
-          case Left(model) => QueryExecutionFactory.create(query, model)
-          case Right(uri) => QueryExecutionFactory.sparqlService(uri.toString, query)
-        }
+        val exec = queryExecution(query)
         if (query.isSelectType) {
           var results = exec.execSelect()
-          var nonEmptyResults = results.hasNext()
+          val nonEmptyResults = results.hasNext
           val timeTaken = (System.currentTimeMillis() - timeTestStart).toFloat / 1000
           testCases = testCases ++ <testcase name={comment} class={className} time={timeTaken.toString}>
             {
@@ -124,15 +147,15 @@ object Run extends App {
                 val expectedResults = new String(Files.readAllBytes(expect.toPath), StandardCharsets.UTF_8)
                 if (actualResults != expectedResults) {
                   errors += 1
-                  System.err.println(s"Testcase $comment\nExpected:\n${expectedResults}\nActual:\n${actualResults}")
+                  System.err.println(s"Testcase $comment\nExpected:\n$expectedResults\nActual:\n$actualResults")
                     <error message={"Expected: \n" + expectedResults + "\nGot: \n" + actualResults}/>
                 }
               } else {
                 // assume there should be no results
                 if (nonEmptyResults) {
                   errors += 1
-                  System.err.println(s"Testcase $comment\nExpected empty result set, got:\n${actualResults}")
-                    <failure message={s"Expected empty result set, got:\n${actualResults}"}/>
+                  System.err.println(s"Testcase $comment\nExpected empty result set, got:\n$actualResults")
+                    <failure message={s"Expected empty result set, got:\n$actualResults"}/>
                 }
               }
             }
