@@ -2,7 +2,7 @@ import sbtassembly.AssemblyPlugin.defaultShellScript
 
 name := "sparql-test-runner"
 
-version := "1.2"
+version := "1.3"
 
 scalaVersion := "2.12.4"
 
