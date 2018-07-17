@@ -149,48 +149,57 @@ object Run extends App {
         tests += 1
         val query = QueryFactory.create(new String(Files.readAllBytes(f.toPath), StandardCharsets.UTF_8))
         val exec = queryExecution(query)
-        if (query.isSelectType) {
-          var results = exec.execSelect()
-          val nonEmptyResults = results.hasNext
-          val timeTaken = (System.currentTimeMillis() - timeTestStart).toFloat / 1000
-          testCases = testCases ++ <testcase name={comment} class={className} time={timeTaken.toString}>
-            {
-              val out = new ByteArrayOutputStream
-              ResultSetFormatter.outputAsCSV(out, results)
-              val actualResults = out.toString("utf-8")
-              val expect = new File(f.getPath.substring(0, f.getPath.lastIndexOf('.')) + ".expected")
-              if (expect.exists && expect.isFile) {
-                val expectedResults = new String(Files.readAllBytes(expect.toPath), StandardCharsets.UTF_8)
-                if (actualResults != expectedResults) {
-                  errors += 1
-                  System.err.println(s"Testcase $comment\nExpected:\n$expectedResults\nActual:\n$actualResults")
-                    <error message={"Expected: \n" + expectedResults + "\nGot: \n" + actualResults}/>
-                }
-              } else {
-                // assume there should be no results
-                if (nonEmptyResults) {
-                  errors += 1
-                  System.err.println(s"Testcase $comment\nExpected empty result set, got:\n$actualResults")
-                    <failure message={s"Expected empty result set, got:\n$actualResults"}/>
+        try {
+          if (query.isSelectType) {
+            var results = exec.execSelect()
+            val nonEmptyResults = results.hasNext
+            val timeTaken = (System.currentTimeMillis() - timeTestStart).toFloat / 1000
+            testCases = testCases ++ <testcase name={comment} class={className} time={timeTaken.toString}>
+              {
+                val out = new ByteArrayOutputStream
+                ResultSetFormatter.outputAsCSV(out, results)
+                val actualResults = out.toString("utf-8")
+                val expect = new File(f.getPath.substring(0, f.getPath.lastIndexOf('.')) + ".expected")
+                if (expect.exists && expect.isFile) {
+                  val expectedResults = new String(Files.readAllBytes(expect.toPath), StandardCharsets.UTF_8)
+                  if (actualResults != expectedResults) {
+                    errors += 1
+                    System.err.println(s"Testcase $comment\nExpected:\n$expectedResults\nActual:\n$actualResults")
+                      <error message={"Expected: \n" + expectedResults + "\nGot: \n" + actualResults}/>
+                  }
+                } else {
+                  // assume there should be no results
+                  if (nonEmptyResults) {
+                    errors += 1
+                    System.err.println(s"Testcase $comment\nExpected empty result set, got:\n$actualResults")
+                      <failure message={s"Expected empty result set, got:\n$actualResults"}/>
+                  }
                 }
               }
-            }
-          </testcase>
-        } else if (query.isAskType) {
-          val result = exec.execAsk()
-          val timeTaken = (System.currentTimeMillis() - timeTestStart).toFloat / 1000
-          testCases = testCases ++ <testcase name={comment} class={className} time={timeTaken.toString}>{
-            if (result) {
-              errors += 1
-              System.err.println(s"Testcase $comment\nExpected ASK query to return FALSE")
-              <failure message={"Constraint violated"}/>
-            }}</testcase>
-        } else {
-          skipped += 1
-          System.out.println(s"Skipped testcase $comment")
-          testCases = testCases ++ <testcase name={comment} class={className}>
-            <skipped/>
-          </testcase>
+            </testcase>
+          } else if (query.isAskType) {
+            val result = exec.execAsk()
+            val timeTaken = (System.currentTimeMillis() - timeTestStart).toFloat / 1000
+            testCases = testCases ++ <testcase name={comment} class={className} time={timeTaken.toString}>{
+              if (result) {
+                errors += 1
+                System.err.println(s"Testcase $comment\nExpected ASK query to return FALSE")
+                <failure message={"Constraint violated"}/>
+              }}</testcase>
+          } else {
+            skipped += 1
+            System.out.println(s"Skipped testcase $comment")
+            testCases = testCases ++ <testcase name={comment} class={className}>
+              <skipped/>
+            </testcase>
+          }
+        } catch {
+          case e: Exception =>
+            testCases = testCases ++
+              <testcase name={comment} class={className}
+                        time={(System.currentTimeMillis() - timeTestStart).toFloat / 1000}>
+                <error message={"Exception running query: " + e.getMessage}/>
+            </testcase>
         }
       }
     }
