@@ -1,0 +1,7 @@
+.idea
+Dockerfile
+project/project
+project/target
+target
+reports
+tests
