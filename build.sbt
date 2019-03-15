@@ -10,7 +10,7 @@ startYear := Some(2018)
 
 licenses += ("Apache-2.0", new URL("https://www.apache.org/licenses/LICENSE-2.0.txt"))
 
-scalaVersion := "2.12.4"
+scalaVersion := "2.12.8"
 
 libraryDependencies ++= Seq(
   "org.apache.jena" % "jena-arq" % "3.6.0",
@@ -19,7 +19,7 @@ libraryDependencies ++= Seq(
   "org.scala-lang.modules" %% "scala-xml" % "1.0.6"
 )
 
-mainClass in assembly := Some("arq.sparql")
+mainClass in assembly := Some("uk.org.floop.sparqlTestRunner.Run")
 
 assemblyMergeStrategy in assembly := {
   case PathList("org", "apache", "commons", "logging", xs @ _*)         => MergeStrategy.first
@@ -31,4 +31,4 @@ assemblyMergeStrategy in assembly := {
 
 assemblyOption in assembly := (assemblyOption in assembly).value.copy(prependShellScript = Some(defaultShellScript))
 
-assemblyJarName in assembly := "sparql"
+assemblyJarName in assembly := "sparql-test-runner"
