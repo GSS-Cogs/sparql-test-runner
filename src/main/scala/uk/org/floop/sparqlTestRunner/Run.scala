@@ -29,6 +29,7 @@ import org.apache.http.impl.client.{BasicAuthCache, BasicCredentialsProvider, Ht
 import org.apache.jena.query._
 import org.apache.jena.rdf.model.ModelFactory
 import org.apache.jena.riot.RDFDataMgr
+import org.apache.jena.riot.system.RiotLib
 
 import scala.io.Source
 import scala.xml.{NodeSeq, PrettyPrinter}
@@ -36,7 +37,7 @@ import scala.xml.{NodeSeq, PrettyPrinter}
 case class Config(dir: File = new File("tests/sparql"),
                   report: File = new File("reports/TESTS-sparql-test-runner.xml"),
                   ignoreFail: Boolean = false, endpoint: Option[URI] = None, auth: Option[String] = None,
-                  data: Seq[File] = Seq())
+                  params: Map[String, String] = Map.empty, data: Seq[File] = Seq())
 
 object Run extends App {
   val packageVersion: String = getClass.getPackage.getImplementationVersion
@@ -57,6 +58,9 @@ object Run extends App {
     opt[String]('a', "auth") optional() valueName "<user:pass>" action { (x, c) =>
       c.copy(auth = Some(x))
     } text "basic authentication username:password"
+    opt[Map[String,String]]('p', name="param") optional() valueName "l=\"somelabel\"@en,n=<some-uri>" action {
+      (x, c) => c.copy(params = x)
+    } text "variables to replace in query"
     arg[File]("<file>...") unbounded() optional() action { (x, c) =>
       c.copy(data = c.data :+ x) } text "data to run the queries against"
     checkConfig( c =>
@@ -103,7 +107,7 @@ object Run extends App {
           dataset.close()
           (query: Query) => QueryExecutionFactory.create(query, union)
       }
-      val (error, results) = runTestsUnder(config.dir, queryExecution, config.dir.toPath)
+      val (error, results) = runTestsUnder(config.dir, config.params, queryExecution, config.dir.toPath)
       for (dir <- Option(config.report.getParentFile)) {
         dir.mkdirs
       }
@@ -115,7 +119,8 @@ object Run extends App {
     case None =>
   }
 
-  def runTestsUnder(dir: File, queryExecution: Query => QueryExecution, root: Path): (Boolean, NodeSeq) = {
+  def runTestsUnder(dir: File, params: Map[String, String],
+                    queryExecution: Query => QueryExecution, root: Path): (Boolean, NodeSeq) = {
     var testSuites = NodeSeq.Empty
     var testCases = NodeSeq.Empty
     var overallError = false
@@ -127,7 +132,7 @@ object Run extends App {
     for (f <- dir.listFiles) yield {
       if (f.isDirectory) {
         val subSuiteStart = System.currentTimeMillis()
-        val (error, subSuites) = runTestsUnder(f, queryExecution, root)
+        val (error, subSuites) = runTestsUnder(f, params, queryExecution, root)
         testSuites ++= subSuites
         overallError |= error
         subSuiteTimes += (System.currentTimeMillis() - subSuiteStart)
@@ -147,7 +152,16 @@ object Run extends App {
             className
         }
         tests += 1
-        val query = QueryFactory.create(new String(Files.readAllBytes(f.toPath), StandardCharsets.UTF_8))
+        val rawQuery = new String(Files.readAllBytes(f.toPath), StandardCharsets.UTF_8)
+        val query = if (params.isEmpty) {
+          QueryFactory.create(rawQuery)
+        } else {
+          val parameterizedSparqlString = new ParameterizedSparqlString(rawQuery)
+          for ( (k, v) <- params ) {
+            parameterizedSparqlString.setParam(k, RiotLib.parse(v))
+          }
+          parameterizedSparqlString.asQuery
+        }
         val exec = queryExecution(query)
         try {
           if (query.isSelectType) {
@@ -197,7 +211,7 @@ object Run extends App {
           case e: Exception =>
             testCases = testCases ++
               <testcase name={comment} class={className}
-                        time={(System.currentTimeMillis() - timeTestStart).toFloat / 1000}>
+                        time={((System.currentTimeMillis() - timeTestStart).toFloat / 1000).toString}>
                 <error message={"Exception running query: " + e.getMessage}/>
             </testcase>
         }
