@@ -26,4 +26,3 @@ RUN sbt assembly
 
 FROM openjdk:8-alpine
 COPY --from=assembly /usr/local/src/target/scala-2.12/sparql-test-runner /usr/local/bin/
-ENTRYPOINT ["sparql-test-runner"]
