@@ -33,6 +33,8 @@ import org.apache.jena.query._
 import org.apache.jena.rdf.model.ModelFactory
 import org.apache.jena.riot.RDFDataMgr
 import org.apache.jena.riot.system.RiotLib
+import org.apache.jena.sparql.engine.http.QueryEngineHTTP
+import scopt.OptionParser
 
 import scala.io.Source
 import scala.xml.{NodeSeq, PrettyPrinter}
@@ -40,11 +42,13 @@ import scala.xml.{NodeSeq, PrettyPrinter}
 case class Config(dir: File = new File("tests/sparql"),
                   report: File = new File("reports/TESTS-sparql-test-runner.xml"),
                   ignoreFail: Boolean = false, endpoint: Option[URI] = None, auth: Option[Either[String, String]] = None,
-                  params: Map[String, String] = Map.empty, data: Seq[File] = Seq())
+                  params: Map[String, String] = Map.empty,
+                  froms: List[String] = List.empty,
+                  data: Seq[File] = Seq())
 
 object Run extends App {
   val packageVersion: String = getClass.getPackage.getImplementationVersion
-  val parser = new scopt.OptionParser[Config]("sparql-testrunner") {
+  val parser: OptionParser[Config] = new scopt.OptionParser[Config]("sparql-testrunner") {
     head("sparql-test-runner", packageVersion)
     opt[File]('t', "testdir") optional() valueName "<dir>" action { (x, c) =>
       c.copy(dir = x)
@@ -67,6 +71,9 @@ object Run extends App {
     opt[Map[String,String]]('p', name="param") optional() valueName "l=\"somelabel\"@en,n=<some-uri>" action {
       (x, c) => c.copy(params = x)
     } text "variables to replace in query"
+    opt[String]('f', name="from") optional() unbounded() valueName "<some-uri>" action {
+      (x, c) => c.copy(froms = c.froms :+ x)
+    } text "graphs to query"
     arg[File]("<file>...") unbounded() optional() action { (x, c) =>
       c.copy(data = c.data :+ x) } text "data to run the queries against"
     checkConfig( c =>
@@ -81,43 +88,54 @@ object Run extends App {
   }
   parser.parse(args, Config()) match {
     case Some(config) =>
-      val queryExecution: Query => QueryExecution = config.endpoint match {
-        case Some(uri) =>
-          // Querying a remote endpoint; if authentication is required, need to set up pre-emptive auth,
-          // see https://hc.apache.org/httpcomponents-client-ga/tutorial/html/authentication.html
-          config.auth match {
-            case Some(Left(userpass)) =>
-              val target = URIUtils.extractHost(uri) // new HttpHost(uri.getHost, uri.getPort)
-              val credsProvider = new BasicCredentialsProvider()
-              credsProvider.setCredentials(
-                new AuthScope(target.getHostName, target.getPort),
-                new UsernamePasswordCredentials(userpass))
-              val authCache = new BasicAuthCache()
-              authCache.put(target, new BasicScheme())
-              val context = HttpClientContext.create()
-              context.setCredentialsProvider(credsProvider)
-              context.setAuthCache(authCache)
-              val client = HttpClients.custom.build()
-              (query: Query) => QueryExecutionFactory.sparqlService(uri.toString, query, client, context)
-            case Some(Right(token)) =>
-              val authHeader = new BasicHeader(HttpHeaders.AUTHORIZATION, "Bearer " + token)
-              val headers = new util.ArrayList[BasicHeader]
-              headers.add(authHeader)
-              val client = HttpClients.custom.setDefaultHeaders(headers).build()
-              (query: Query) => QueryExecutionFactory.sparqlService(uri.toString, query, client)
-            case None =>
-              (query: Query) => QueryExecutionFactory.sparqlService(uri.toString, query)
-          }
-        case None =>
-          val dataset = DatasetFactory.create
-          for (d <- config.data) {
-            RDFDataMgr.read(dataset, d.toString)
-          }
-          val union = ModelFactory.createDefaultModel
-          union.add(dataset.getDefaultModel)
-          union.add(dataset.getUnionModel)
-          dataset.close()
-          (query: Query) => QueryExecutionFactory.create(query, union)
+      val queryExecution: Query => QueryExecution = (query: Query) => {
+        val exec = config.endpoint match {
+          case Some(uri) =>
+            // Querying a remote endpoint; if authentication is required, need to set up pre-emptive auth,
+            // see https://hc.apache.org/httpcomponents-client-ga/tutorial/html/authentication.html
+            config.auth match {
+              case Some(Left(userpass)) =>
+                val target = URIUtils.extractHost(uri) // new HttpHost(uri.getHost, uri.getPort)
+                val credsProvider = new BasicCredentialsProvider()
+                credsProvider.setCredentials(
+                  new AuthScope(target.getHostName, target.getPort),
+                  new UsernamePasswordCredentials(userpass))
+                val authCache = new BasicAuthCache()
+                authCache.put(target, new BasicScheme())
+                val context = HttpClientContext.create()
+                context.setCredentialsProvider(credsProvider)
+                context.setAuthCache(authCache)
+                val client = HttpClients.custom.build()
+                QueryExecutionFactory.sparqlService (uri.toString, query, client, context)
+              case Some(Right(token)) =>
+                val authHeader = new BasicHeader(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                val headers = new util.ArrayList[BasicHeader]
+                headers.add(authHeader)
+                val client = HttpClients.custom.setDefaultHeaders(headers).build()
+                QueryExecutionFactory.sparqlService(uri.toString, query, client)
+              case None =>
+                QueryExecutionFactory.sparqlService(uri.toString, query)
+            }
+          case None =>
+            val dataset = DatasetFactory.create
+            for (d <- config.data) {
+              RDFDataMgr.read(dataset, d.toString)
+            }
+            val union = ModelFactory.createDefaultModel
+            union.add(dataset.getDefaultModel)
+            union.add(dataset.getUnionModel)
+            dataset.close()
+            QueryExecutionFactory.create(query, union)
+        }
+        // if this is an HTTP executor, then we can add the FROM graphs as part of the protocol
+        exec match {
+          case httpExec: QueryEngineHTTP =>
+            for (g <- config.froms) {
+              httpExec.addDefaultGraph(g)
+            }
+            httpExec
+          case other => other
+        }
       }
       val (error, results) = runTestsUnder(config.dir, config.params, queryExecution, config.dir.toPath)
       for (dir <- Option(config.report.getParentFile)) {
