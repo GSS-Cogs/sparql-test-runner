@@ -44,6 +44,7 @@ case class Config(dir: File = new File("tests/sparql"),
                   ignoreFail: Boolean = false, endpoint: Option[URI] = None, auth: Option[Either[String, String]] = None,
                   params: Map[String, String] = Map.empty,
                   froms: List[String] = List.empty,
+                  limit: Option[Int] = None,
                   data: Seq[File] = Seq())
 
 object Run extends App {
@@ -74,6 +75,9 @@ object Run extends App {
     opt[String]('f', name="from") optional() unbounded() valueName "<some-uri>" action {
       (x, c) => c.copy(froms = c.froms :+ x)
     } text "graphs to query"
+    opt[Int]('l', name="limit") optional() valueName "<max>" action {
+      (x, c) => c.copy(limit = Some(x))
+    } text "limit the number of results (examples of failure) to return"
     arg[File]("<file>...") unbounded() optional() action { (x, c) =>
       c.copy(data = c.data :+ x) } text "data to run the queries against"
     checkConfig( c =>
@@ -137,7 +141,7 @@ object Run extends App {
           case other => other
         }
       }
-      val (error, results) = runTestsUnder(config.dir, config.params, queryExecution, config.dir.toPath)
+      val (error, results) = runTestsUnder(config.dir, config.params, config.limit, queryExecution, config.dir.toPath)
       for (dir <- Option(config.report.getParentFile)) {
         dir.mkdirs
       }
@@ -149,7 +153,7 @@ object Run extends App {
     case None =>
   }
 
-  def runTestsUnder(dir: File, params: Map[String, String],
+  def runTestsUnder(dir: File, params: Map[String, String], limit: Option[Int],
                     queryExecution: Query => QueryExecution, root: Path): (Boolean, NodeSeq) = {
     var testSuites = NodeSeq.Empty
     var testCases = NodeSeq.Empty
@@ -162,7 +166,7 @@ object Run extends App {
     for (f <- dir.listFiles) yield {
       if (f.isDirectory) {
         val subSuiteStart = System.currentTimeMillis()
-        val (error, subSuites) = runTestsUnder(f, params, queryExecution, root)
+        val (error, subSuites) = runTestsUnder(f, params, limit, queryExecution, root)
         testSuites ++= subSuites
         overallError |= error
         subSuiteTimes += (System.currentTimeMillis() - subSuiteStart)
@@ -191,6 +195,9 @@ object Run extends App {
             parameterizedSparqlString.setParam(k, RiotLib.parse(v))
           }
           parameterizedSparqlString.asQuery
+        }
+        if (query.isSelectType) {
+          limit.foreach(n => query.setLimit(n))
         }
         val exec = queryExecution(query)
         try {
