@@ -21,7 +21,6 @@ import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 import java.util
-
 import org.apache.http.HttpHeaders
 import org.apache.http.auth.{AuthScope, UsernamePasswordCredentials}
 import org.apache.http.client.protocol.HttpClientContext
@@ -37,7 +36,7 @@ import org.apache.jena.sparql.engine.http.QueryEngineHTTP
 import scopt.OptionParser
 
 import scala.io.Source
-import scala.xml.{NodeSeq, PrettyPrinter}
+import scala.xml.{NodeSeq, PCData, PrettyPrinter}
 
 case class Config(dir: File = new File("tests/sparql"),
                   report: File = new File("reports/TESTS-sparql-test-runner.xml"),
@@ -173,7 +172,6 @@ object Run extends App {
     val timeSuiteStart = System.currentTimeMillis()
     for (f <- dir.listFiles) yield {
       if (f.isDirectory) {
-        val subSuiteStart = System.currentTimeMillis()
         val (subErrors, subFailures, subTests, subSuites) = runTestsUnder(f, params, limit, queryExecution, root)
         testSuites ++= subSuites
         errors += subErrors
@@ -211,7 +209,7 @@ object Run extends App {
         val exec = queryExecution(query)
         try {
           if (query.isSelectType) {
-            var results = exec.execSelect()
+            val results = exec.execSelect()
             val nonEmptyResults = results.hasNext
             val timeTaken = (System.currentTimeMillis() - timeTestStart).toFloat / 1000
             testCases = testCases ++ <testcase name={comment} classname={className} time={timeTaken.toString}>
@@ -225,14 +223,16 @@ object Run extends App {
                   if (actualResults != expectedResults) {
                     failures += 1
                     System.err.println(s"Testcase $comment\nExpected:\n$expectedResults\nActual:\n$actualResults")
-                      <failure message={"Expected: \n" + expectedResults + "\nGot: \n" + actualResults}/>
+                      <failure message="Constraint violated">{
+                        PCData(s"Expected:\n$expectedResults\nGot:\n$actualResults")}</failure>
                   }
                 } else {
                   // assume there should be no results
                   if (nonEmptyResults) {
                     failures += 1
                     System.err.println(s"Testcase $comment\nExpected empty result set, got:\n$actualResults")
-                      <failure message={s"Expected empty result set, got:\n$actualResults"}/>
+                      <failure message="Constraint violated">{
+                        PCData(s"Expected empty result set, got:\n$actualResults")}</failure>
                   }
                 }
               }
@@ -244,7 +244,7 @@ object Run extends App {
               if (result) {
                 failures += 1
                 System.err.println(s"Testcase $comment\nExpected ASK query to return FALSE")
-                <failure message={"Constraint violated"}/>
+                <failure message={"Constraint violated"}>Expected ASK query to return FALSE</failure>
               }}</testcase>
           } else {
             skipped += 1
@@ -267,7 +267,7 @@ object Run extends App {
     val testSuiteTime = (System.currentTimeMillis() - timeSuiteStart).toFloat / 1000
     val suiteName = {
       val relativeName = root.toAbsolutePath.getParent.relativize(dir.toPath.toAbsolutePath).toString
-      if (relativeName.length == 0) {
+      if (relativeName.isEmpty) {
         "root"
       } else {
         relativeName
