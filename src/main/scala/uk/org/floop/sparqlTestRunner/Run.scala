@@ -141,35 +141,44 @@ object Run extends App {
           case other => other
         }
       }
-      val (error, results) = runTestsUnder(config.dir, config.params, config.limit, queryExecution, config.dir.toPath)
+      // https://llg.cubic.org/docs/junit/ gives details of JUnit XML format, specifically for Jenkins.
+      val timeSuiteStart = System.currentTimeMillis()
+      val (errors, failures, tests, results) = runTestsUnder(config.dir, config.params, config.limit, queryExecution, config.dir.toPath)
       for (dir <- Option(config.report.getParentFile)) {
         dir.mkdirs
       }
       val pp = new PrettyPrinter(80, 2)
       val pw = new PrintWriter(config.report)
-      pw.write(pp.format(<testsuites>{results}</testsuites>))
+      pw.write(pp.format(
+        <testsuites
+          errors={errors.toString}
+          failures={failures.toString}
+          tests={tests.toString}
+          time={((System.currentTimeMillis() - timeSuiteStart).toFloat / 1000).toString}>
+          {results}
+        </testsuites>))
       pw.close()
-      System.exit(if (error && !config.ignoreFail) 1 else 0)
+      System.exit(if (!config.ignoreFail && (errors > 0 || failures > 0)) 1 else 0)
     case None =>
   }
 
   def runTestsUnder(dir: File, params: Map[String, String], limit: Option[Int],
-                    queryExecution: Query => QueryExecution, root: Path): (Boolean, NodeSeq) = {
+                    queryExecution: Query => QueryExecution, root: Path): (Int, Int, Int, NodeSeq) = {
     var testSuites = NodeSeq.Empty
     var testCases = NodeSeq.Empty
-    var overallError = false
     var errors = 0
+    var failures = 0
     var skipped = 0
     var tests = 0
     val timeSuiteStart = System.currentTimeMillis()
-    var subSuiteTimes = 0L
     for (f <- dir.listFiles) yield {
       if (f.isDirectory) {
         val subSuiteStart = System.currentTimeMillis()
-        val (error, subSuites) = runTestsUnder(f, params, limit, queryExecution, root)
+        val (subErrors, subFailures, subTests, subSuites) = runTestsUnder(f, params, limit, queryExecution, root)
         testSuites ++= subSuites
-        overallError |= error
-        subSuiteTimes += (System.currentTimeMillis() - subSuiteStart)
+        errors += subErrors
+        failures += subFailures
+        tests += subTests
       } else if (f.isFile && f.getName.endsWith(".sparql")) {
         val timeTestStart = System.currentTimeMillis()
         val relativePath = root.relativize(f.toPath).toString
@@ -205,7 +214,7 @@ object Run extends App {
             var results = exec.execSelect()
             val nonEmptyResults = results.hasNext
             val timeTaken = (System.currentTimeMillis() - timeTestStart).toFloat / 1000
-            testCases = testCases ++ <testcase name={comment} class={className} time={timeTaken.toString}>
+            testCases = testCases ++ <testcase name={comment} classname={className} time={timeTaken.toString}>
               {
                 val out = new ByteArrayOutputStream
                 ResultSetFormatter.outputAsCSV(out, results)
@@ -214,14 +223,14 @@ object Run extends App {
                 if (expect.exists && expect.isFile) {
                   val expectedResults = new String(Files.readAllBytes(expect.toPath), StandardCharsets.UTF_8)
                   if (actualResults != expectedResults) {
-                    errors += 1
+                    failures += 1
                     System.err.println(s"Testcase $comment\nExpected:\n$expectedResults\nActual:\n$actualResults")
-                      <error message={"Expected: \n" + expectedResults + "\nGot: \n" + actualResults}/>
+                      <failure message={"Expected: \n" + expectedResults + "\nGot: \n" + actualResults}/>
                   }
                 } else {
                   // assume there should be no results
                   if (nonEmptyResults) {
-                    errors += 1
+                    failures += 1
                     System.err.println(s"Testcase $comment\nExpected empty result set, got:\n$actualResults")
                       <failure message={s"Expected empty result set, got:\n$actualResults"}/>
                   }
@@ -231,33 +240,31 @@ object Run extends App {
           } else if (query.isAskType) {
             val result = exec.execAsk()
             val timeTaken = (System.currentTimeMillis() - timeTestStart).toFloat / 1000
-            testCases = testCases ++ <testcase name={comment} class={className} time={timeTaken.toString}>{
+            testCases = testCases ++ <testcase name={comment} classname={className} time={timeTaken.toString}>{
               if (result) {
-                errors += 1
+                failures += 1
                 System.err.println(s"Testcase $comment\nExpected ASK query to return FALSE")
                 <failure message={"Constraint violated"}/>
               }}</testcase>
           } else {
             skipped += 1
             System.out.println(s"Skipped testcase $comment")
-            testCases = testCases ++ <testcase name={comment} class={className}>
+            testCases = testCases ++ <testcase name={comment} classname={className}>
               <skipped/>
             </testcase>
           }
         } catch {
           case e: Exception =>
             testCases = testCases ++
-              <testcase name={comment} class={className}
+              <testcase name={comment} classname={className}
                         time={((System.currentTimeMillis() - timeTestStart).toFloat / 1000).toString}>
                 <error message={"Exception running query: " + e.getMessage}/>
             </testcase>
+            errors += 1
         }
       }
     }
-    if (errors > 0) {
-      overallError = true
-    }
-    val testSuiteTime = (System.currentTimeMillis() - timeSuiteStart - subSuiteTimes).toFloat / 1000
+    val testSuiteTime = (System.currentTimeMillis() - timeSuiteStart).toFloat / 1000
     val suiteName = {
       val relativeName = root.toAbsolutePath.getParent.relativize(dir.toPath.toAbsolutePath).toString
       if (relativeName.length == 0) {
@@ -266,8 +273,13 @@ object Run extends App {
         relativeName
       }
     }
-    (overallError, testSuites ++ <testsuite errors={errors.toString} tests={tests.toString} time={testSuiteTime.toString}
-                             name={suiteName} skipped={skipped.toString}>
+    (errors, failures, tests, testSuites ++
+      <testsuite errors={errors.toString}
+                 failures={failures.toString}
+                 tests={tests.toString}
+                 time={testSuiteTime.toString}
+                 name={suiteName}
+                 skipped={skipped.toString}>
       {testCases}
     </testsuite>)
   }
