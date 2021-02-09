@@ -16,22 +16,21 @@
 
 package uk.org.floop.updateInPlace
 
-import java.io.{File, FileOutputStream, FileWriter}
-import java.nio.file.{Files, Path}
-
-import org.apache.jena.query.{Dataset, DatasetFactory, QueryExecutionFactory, QueryFactory}
-import org.apache.jena.rdf.model.{Model, ModelFactory}
-import org.apache.jena.riot.{Lang, RDFDataMgr, RDFLanguages}
+import org.apache.jena.query.{Dataset, DatasetFactory}
+import org.apache.jena.riot.{RDFDataMgr, RDFLanguages}
 import org.apache.jena.update.UpdateAction
 
+import java.io.{File, FileOutputStream}
+import java.nio.file.Files
 import scala.io.Source
+import scala.util.Using
 
 case class Config(dir: File = new File("sparql"),
                   data: File = null)
 
 object Run extends App {
 
-  val packageVersion: String = getClass.getPackage.getImplementationVersion()
+  val packageVersion: String = getClass.getPackage.getImplementationVersion
   val parser = new scopt.OptionParser[Config]("sparql-update-in-place") {
     head("sparql-update-in-place", packageVersion)
     opt[File]('q', "querydir")
@@ -52,15 +51,17 @@ object Run extends App {
       runQueriesUnder(config.dir, dataset, config.data)
       val out = new FileOutputStream(config.data)
       RDFDataMgr.write(out, dataset.getDefaultModel, RDFLanguages.filenameToLang(config.data.toString))
-      out.close
+      out.close()
   }
 
   def runQueriesUnder(dir: File, dataset: Dataset, out: File): Unit = {
-    Files.walk(dir.toPath()).
-      filter(Files.isRegularFile(_)).
-      sorted((p1, p2) => p1.compareTo((p2))).
-      forEach { p =>
-        UpdateAction.parseExecute(Source.fromFile(p.toFile).mkString, dataset)
+    Files.walk(dir.toPath)
+      .filter(Files.isRegularFile(_))
+      .sorted((p1, p2) => p1.compareTo(p2))
+      .forEach { p =>
+        Using(Source.fromFile(p.toFile)) { src =>
+          UpdateAction.parseExecute(src.mkString, dataset)
+        }
       }
   }
 

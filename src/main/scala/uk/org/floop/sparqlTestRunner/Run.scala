@@ -16,11 +16,6 @@
 
 package uk.org.floop.sparqlTestRunner
 
-import java.io._
-import java.net.URI
-import java.nio.charset.StandardCharsets
-import java.nio.file.{Files, Path}
-import java.util
 import org.apache.http.HttpHeaders
 import org.apache.http.auth.{AuthScope, UsernamePasswordCredentials}
 import org.apache.http.client.protocol.HttpClientContext
@@ -35,8 +30,14 @@ import org.apache.jena.riot.system.RiotLib
 import org.apache.jena.sparql.engine.http.QueryEngineHTTP
 import scopt.OptionParser
 
+import java.io._
+import java.net.URI
+import java.nio.charset.StandardCharsets
+import java.nio.file.{Files, Path}
+import java.util
 import scala.io.Source
-import scala.xml.{NodeSeq, PCData, PrettyPrinter, XML}
+import scala.util.Using
+import scala.xml.{NodeSeq, PCData, XML}
 
 case class Config(dir: File = new File("tests/sparql"),
                   report: File = new File("reports/TESTS-sparql-test-runner.xml"),
@@ -199,9 +200,11 @@ object Run extends App {
       } else if (f.isFile && f.getName.endsWith(".sparql")) {
         val timeTestStart = System.currentTimeMillis()
         val relativePath = root.relativize(f.toPath).toString
-        val className = relativePath.substring(0, relativePath.lastIndexOf('.')).replace(File.pathSeparatorChar, '.')
+        val className = relativePath
+          .substring(0, relativePath.lastIndexOf('.'))
+          .replace(File.pathSeparatorChar, '.')
         val comment = {
-          val queryLines = Source.fromFile(f).getLines()
+          val queryLines = Using(Source.fromFile(f))(_.getLines()).get
           if (queryLines.hasNext) {
             val line = queryLines.next()
             if (line.startsWith("# "))
