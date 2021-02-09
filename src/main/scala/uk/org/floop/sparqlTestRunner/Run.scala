@@ -36,7 +36,7 @@ import org.apache.jena.sparql.engine.http.QueryEngineHTTP
 import scopt.OptionParser
 
 import scala.io.Source
-import scala.xml.{NodeSeq, PCData, PrettyPrinter}
+import scala.xml.{NodeSeq, PCData, PrettyPrinter, XML}
 
 case class Config(dir: File = new File("tests/sparql"),
                   report: File = new File("reports/TESTS-sparql-test-runner.xml"),
@@ -146,17 +146,15 @@ object Run extends App {
       for (dir <- Option(config.report.getParentFile)) {
         dir.mkdirs
       }
-      val pp = new PrettyPrinter(80, 2)
-      val pw = new PrintWriter(config.report)
-      pw.write(pp.format(
+      XML.save(config.report.getPath,
         <testsuites
           errors={errors.toString}
           failures={failures.toString}
           tests={tests.toString}
           time={((System.currentTimeMillis() - timeSuiteStart).toFloat / 1000).toString}>
           {results}
-        </testsuites>))
-      pw.close()
+        </testsuites>,
+        enc = "UTF-8", xmlDecl = true)
       System.exit(if (!config.ignoreFail && (errors > 0 || failures > 0)) 1 else 0)
     case None =>
   }
