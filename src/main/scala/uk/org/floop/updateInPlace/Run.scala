@@ -34,11 +34,15 @@ object Run extends App {
   val packageVersion: String = getClass.getPackage.getImplementationVersion()
   val parser = new scopt.OptionParser[Config]("sparql-update-in-place") {
     head("sparql-update-in-place", packageVersion)
-    opt[File]('q', "querydir") optional() valueName "<dir>" action { (x, c) =>
-      c.copy(dir = x)
-    } text "location of SPARQL update queries to run, defaults to sparql"
-    arg[File]("<file>") required() action { (x, c) =>
-      c.copy(data = x) } text "data to update in-place"
+    opt[File]('q', "querydir")
+      .optional()
+      .valueName("<dir>")
+      .action((x, c) => c.copy(dir = x))
+      .text("location of SPARQL update queries to run, defaults to sparql")
+    arg[File]("<file>")
+      .required()
+      .action((x, c) => c.copy(data = x))
+      .text("data to update in-place")
   }
   parser.parse(args, Config()) match {
     case None =>

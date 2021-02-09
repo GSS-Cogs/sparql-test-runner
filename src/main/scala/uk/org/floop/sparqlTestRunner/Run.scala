@@ -50,35 +50,56 @@ object Run extends App {
   val packageVersion: String = getClass.getPackage.getImplementationVersion
   val parser: OptionParser[Config] = new scopt.OptionParser[Config]("sparql-testrunner") {
     head("sparql-test-runner", packageVersion)
-    opt[File]('t', "testdir") optional() valueName "<dir>" action { (x, c) =>
-      c.copy(dir = x)
-    } text "location of SPARQL queries to run, defaults to tests/sparql"
-    opt[File]('r', "report") optional() valueName "<report>" action { (x, c) =>
-      c.copy(report = x)
-    } text "file to output XML test report, defaults to reports/TESTS-sparql-test-runner.xml"
-    opt[Unit]('i', "ignorefail") optional() action { (_, c) =>
-      c.copy(ignoreFail = true)
-    } text "exit with success even if there are reported failures"
-    opt[URI]('s', name= "service") optional() valueName "<HTTP URI>" action { (x, c) =>
-      c.copy(endpoint = Some(x))
-    } text "SPARQL endpoint to run the queries against"
-    opt[String]('a', "auth") optional() valueName "<user:pass>" action { (x, c) =>
-      c.copy(auth = Some(Left(x)))
-    } text "basic authentication username:password"
-    opt[String]('k', "token") optional() valueName "<user:pass>" action { (x, c) =>
-      c.copy(auth = Some(Right(x)))
-    } text "oAuth token"
-    opt[Map[String,String]]('p', name="param") optional() valueName "l=\"somelabel\"@en,n=<some-uri>" action {
-      (x, c) => c.copy(params = x)
-    } text "variables to replace in query"
-    opt[String]('f', name="from") optional() unbounded() valueName "<some-uri>" action {
-      (x, c) => c.copy(froms = c.froms :+ x)
-    } text "graphs to query"
-    opt[Int]('l', name="limit") optional() valueName "<max>" action {
-      (x, c) => c.copy(limit = Some(x))
-    } text "limit the number of results (examples of failure) to return"
-    arg[File]("<file>...") unbounded() optional() action { (x, c) =>
-      c.copy(data = c.data :+ x) } text "data to run the queries against"
+    opt[File]('t', "testdir")
+      .optional()
+      .valueName("<dir>")
+      .action((x, c) => c.copy(dir = x))
+      .text("location of SPARQL queries to run, defaults to tests/sparql")
+    opt[File]('r', "report")
+      .optional()
+      .valueName("<report>")
+      .action((x, c) => c.copy(report = x))
+      .text("file to output XML test report, defaults to reports/TESTS-sparql-test-runner.xml")
+    opt[Unit]('i', "ignorefail")
+      .optional()
+      .action((_, c) => c.copy(ignoreFail = true))
+      .text("exit with success even if there are reported failures")
+    opt[URI]('s', name= "service")
+      .optional()
+      .valueName("<HTTP URI>")
+      .action((x, c) => c.copy(endpoint = Some(x)))
+      .text("SPARQL endpoint to run the queries against")
+    opt[String]('a', "auth")
+      .optional()
+      .valueName("<user:pass>")
+      .action((x, c) => c.copy(auth = Some(Left(x))))
+      .text("basic authentication username:password")
+    opt[String]('k', "token")
+      .optional()
+      .valueName("<user:pass>")
+      .action((x, c) => c.copy(auth = Some(Right(x))))
+      .text("oAuth token")
+    opt[Map[String,String]]('p', name="param")
+      .optional()
+      .valueName("l=\"somelabel\"@en,n=<some-uri>")
+      .action((x, c) => c.copy(params = x))
+      .text("variables to replace in query")
+    opt[String]('f', name="from")
+      .optional()
+      .unbounded()
+      .valueName("<some-uri>")
+      .action((x, c) => c.copy(froms = c.froms :+ x))
+      .text("graphs to query")
+    opt[Int]('l', name="limit")
+      .optional()
+      .valueName("<max>")
+      .action((x, c) => c.copy(limit = Some(x)))
+      .text("limit the number of results (examples of failure) to return")
+    arg[File]("<file>...")
+      .unbounded()
+      .optional()
+      .action((x, c) => c.copy(data = c.data :+ x))
+      .text("data to run the queries against")
     checkConfig( c =>
       if (!c.dir.exists || !c.dir.isDirectory) {
         failure("Tests directory (" + c.dir.toString + ") doesn't exist or isn't a directory.")
