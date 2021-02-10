@@ -204,15 +204,16 @@ object Run extends App {
           .substring(0, relativePath.lastIndexOf('.'))
           .replace(File.pathSeparatorChar, '.')
         val comment = {
-          val queryLines = Using(Source.fromFile(f))(_.getLines()).get
-          if (queryLines.hasNext) {
-            val line = queryLines.next()
-            if (line.startsWith("# "))
-              line.substring(2)
-            else
-              line
-          } else
-            className
+          Using.resource(Source.fromFile(f)) { src =>
+            src.getLines().nextOption() match {
+              case Some(line) =>
+                if (line.startsWith("# "))
+                  line.substring(2)
+                else
+                  className
+              case None => className
+            }
+          }
         }
         tests += 1
         val rawQuery = new String(Files.readAllBytes(f.toPath), StandardCharsets.UTF_8)
@@ -280,7 +281,12 @@ object Run extends App {
             testCases = testCases ++
               <testcase name={comment} classname={className}
                         time={((System.currentTimeMillis() - timeTestStart).toFloat / 1000).toString}>
-                <error message={"Exception running query: " + e.getMessage}/>
+                <error message={"Exception running query: " + e.getMessage}>{PCData({
+                  val sw = new StringWriter()
+                  val pw = new PrintWriter(sw)
+                  e.printStackTrace(pw)
+                  sw.toString
+                })}</error>
             </testcase>
             errors += 1
         }
