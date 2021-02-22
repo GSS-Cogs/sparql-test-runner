@@ -39,7 +39,7 @@ import scala.io.Source
 import scala.util.Using
 import scala.xml.{NodeSeq, PCData, XML}
 
-case class Config(dir: File = new File("tests/sparql"),
+case class Config(dirs: List[File] = List.empty,
                   report: File = new File("reports/TESTS-sparql-test-runner.xml"),
                   ignoreFail: Boolean = false, endpoint: Option[URI] = None, auth: Option[Either[String, String]] = None,
                   params: Map[String, String] = Map.empty,
@@ -49,13 +49,15 @@ case class Config(dir: File = new File("tests/sparql"),
 
 object Run extends App {
   val packageVersion: String = getClass.getPackage.getImplementationVersion
+  val defaultDir = new File("tests/sparql")
   val parser: OptionParser[Config] = new scopt.OptionParser[Config]("sparql-testrunner") {
     head("sparql-test-runner", packageVersion)
     opt[File]('t', "testdir")
       .optional()
+      .unbounded()
       .valueName("<dir>")
-      .action((x, c) => c.copy(dir = x))
-      .text("location of SPARQL queries to run, defaults to tests/sparql")
+      .action((x, c) => c.copy(dirs = c.dirs :+ x))
+      .text("location of SPARQL queries to run, defaults to tests/sparql, can be specified multiple times")
     opt[File]('r', "report")
       .optional()
       .valueName("<report>")
@@ -101,15 +103,27 @@ object Run extends App {
       .optional()
       .action((x, c) => c.copy(data = c.data :+ x))
       .text("data to run the queries against")
-    checkConfig( c =>
-      if (!c.dir.exists || !c.dir.isDirectory) {
-        failure("Tests directory (" + c.dir.toString + ") doesn't exist or isn't a directory.")
-      } else if (c.endpoint.isDefined && c.data.nonEmpty) {
-        failure("Specify either a SPARQL endpoint or data files, not both.")
-      } else if (c.endpoint.isEmpty && c.data.isEmpty) {
-        failure("Must specify either a SPARQL endpoint or some data files.")
-      } else success
-    )
+    checkConfig( c => {
+      val badDirs = for {
+        d <- c.dirs match {
+          case Nil => List(defaultDir)
+          case _ => c.dirs
+        }
+        if !d.exists || !d.isDirectory
+      } yield d
+      badDirs match {
+        case List(d) =>
+          failure("Tests directory (" + d.toString + ") doesn't exist or isn't a directory.")
+        case List(_, _*) =>
+          failure("Test directories (" + badDirs.map(_.toString).mkString(", ") + ") don't exist or are not directories.")
+        case Nil =>
+          if (c.endpoint.isDefined && c.data.nonEmpty) {
+            failure("Specify either a SPARQL endpoint or data files, not both.")
+          } else if (c.endpoint.isEmpty && c.data.isEmpty) {
+            failure("Must specify either a SPARQL endpoint or some data files.")
+          } else success
+      }
+    })
   }
   parser.parse(args, Config()) match {
     case Some(config) =>
@@ -164,7 +178,13 @@ object Run extends App {
       }
       // https://llg.cubic.org/docs/junit/ gives details of JUnit XML format, specifically for Jenkins.
       val timeSuiteStart = System.currentTimeMillis()
-      val (errors, failures, tests, results) = runTestsUnder(config.dir, config.params, config.limit, queryExecution, config.dir.toPath)
+      val (errors, failures, tests, results) = (config.dirs match {
+        case Nil => List(defaultDir)
+        case _ => config.dirs
+      }).foldLeft[(Int, Int, Int, NodeSeq)](0, 0, 0, Nil) { (a, d) =>
+        val (e2, f2, t2, r2) = runTestsUnder(d, config.params, config.limit, queryExecution, d.toPath)
+        (a._1 + e2, a._2 + f2, a._3 + t2, a._4 ++ r2)
+      }
       for (dir <- Option(config.report.getParentFile)) {
         dir.mkdirs
       }
