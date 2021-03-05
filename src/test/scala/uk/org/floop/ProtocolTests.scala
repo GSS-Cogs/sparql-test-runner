@@ -41,7 +41,7 @@ class ProtocolTests extends AnyFlatSpec with BeforeAndAfterEach {
     assert(errors == 1)
     assert(failures == 0)
     assert(tests == 1)
-    val error = results \ "testcase" \ "error"
+    val error = results \ "testcase" \ "error" \ "@message"
     error.text should include ("exploded")
   }
 }

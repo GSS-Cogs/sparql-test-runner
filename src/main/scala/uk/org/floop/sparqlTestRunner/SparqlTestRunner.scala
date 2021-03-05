@@ -307,7 +307,7 @@ object SparqlTestRunner {
             testCases = testCases ++
               <testcase name={comment} classname={className}
                         time={((System.currentTimeMillis() - timeTestStart).toFloat / 1000).toString}>
-                <error message={"Exception running query: " + httpException.getMessage}>{httpException.getResponse}</error>
+                <error message={s"Exception running query: ${httpException.getMessage}; ${httpException.getResponse}"}/>
               </testcase>
             errors += 1
           case e: Exception =>
