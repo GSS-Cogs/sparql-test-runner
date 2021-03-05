@@ -28,11 +28,11 @@ class ProtocolTests extends AnyFlatSpec with BeforeAndAfterEach {
           .withBody("Server exploded")
           .withStatus(503)))
 
+    val testDir = Paths.get(this.getClass.getResource("examples").toURI)
     val (queryExecution, config, testDirs) = parseArgs(Array(
-      "-i",
+      "-t", testDir.toString,
       "-s", s"http://localhost:${wireMockServer.port()}/sparql"
     ))
-    val testDir = Paths.get(this.getClass.getResource("examples").toURI)
     val (errors, failures, tests, results) = runTestsUnder(
       testDir.toFile, config.params, config.limit, queryExecution, testDir)
     wireMockServer.verify(
