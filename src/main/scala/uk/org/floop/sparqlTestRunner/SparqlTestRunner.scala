@@ -41,7 +41,7 @@ import scala.xml.{NodeSeq, PCData, XML}
 
 case class Config(dirs: List[File] = List.empty,
                   report: File = new File("reports/TESTS-sparql-test-runner.xml"),
-                  ignoreFail: Boolean = false, endpoint: Option[URI] = None, auth: Option[Either[String, String]] = None,
+                  ignoreError: Boolean = false, endpoint: Option[URI] = None, auth: Option[Either[String, String]] = None,
                   params: Map[String, String] = Map.empty,
                   froms: List[String] = List.empty,
                   limit: Option[Int] = None,
@@ -63,10 +63,10 @@ object SparqlTestRunner {
       .valueName("<report>")
       .action((x, c) => c.copy(report = x))
       .text("file to output XML test report, defaults to reports/TESTS-sparql-test-runner.xml")
-    opt[Unit]('i', "ignorefail")
+    opt[Unit]('i', "ignoreerror")
       .optional()
-      .action((_, c) => c.copy(ignoreFail = true))
-      .text("exit with success even if there are reported failures")
+      .action((_, c) => c.copy(ignoreError = true))
+      .text("errors (exceptions) are recorded, but don't change the exit status")
     opt[URI]('s', name = "service")
       .optional()
       .valueName("<HTTP URI>")
@@ -201,7 +201,7 @@ object SparqlTestRunner {
         {results}
       </testsuites>,
       enc = "UTF-8", xmlDecl = true)
-    System.exit(if (!config.ignoreFail && (errors > 0 || failures > 0)) 1 else 0)
+    System.exit(if ((!config.ignoreError && (errors > 0)) || (failures > 0)) 1 else 0)
   }
 
   def runTestsUnder(dir: File, params: Map[String, String], limit: Option[Int],
