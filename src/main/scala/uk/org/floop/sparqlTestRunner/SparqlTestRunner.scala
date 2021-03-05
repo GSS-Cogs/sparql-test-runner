@@ -254,7 +254,6 @@ object SparqlTestRunner {
         }
         val exec = queryExecution(query)
         System.out.println(s"Running query $f")
-        exec.getContext.set(ARQ.symLogExec, Explain.InfoLevel.ALL)
         try {
           if (query.isSelectType) {
             val results = exec.execSelect()
