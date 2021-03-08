@@ -24,6 +24,7 @@ lazy val sparqlTestRunner = (project in file("."))
       "com.github.scopt" %% "scopt" % "4.0.0",
       "org.scala-lang.modules" %% "scala-xml" % "1.3.0",
       "org.slf4j" % "slf4j-simple" % "1.7.30",
+      "com.typesafe.scala-logging" %% "scala-logging" % "3.9.2",
       "xerces" % "xercesImpl" % "2.12.1",
       "org.scalactic" %% "scalactic" % "3.2.5" % Test,
       "org.scalatest" %% "scalatest" % "3.2.5" % Test,

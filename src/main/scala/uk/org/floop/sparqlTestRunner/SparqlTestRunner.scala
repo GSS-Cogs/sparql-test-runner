@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Alex Tucker
+ * Copyright 2021 Alex Tucker
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 package uk.org.floop.sparqlTestRunner
 
+import com.typesafe.scalalogging.LazyLogging
 import org.apache.http.HttpHeaders
 import org.apache.http.auth.{AuthScope, UsernamePasswordCredentials}
 import org.apache.http.client.protocol.HttpClientContext
@@ -47,7 +48,7 @@ case class Config(dirs: List[File] = List.empty,
                   limit: Option[Int] = None,
                   data: Seq[File] = Seq())
 
-object SparqlTestRunner {
+object SparqlTestRunner extends LazyLogging {
   val packageVersion: String = getClass.getPackage.getImplementationVersion
   val defaultDir = new File("tests/sparql")
   val parser: OptionParser[Config] = new scopt.OptionParser[Config]("sparql-testrunner") {
@@ -160,7 +161,7 @@ object SparqlTestRunner {
             case None =>
               val dataset = DatasetFactory.create
               for (d <- config.data) {
-                println(s"Loading $d")
+                logger.debug(s"Loading $d")
                 RDFDataMgr.read(dataset, d.toString)
               }
               (query: Query) => QueryExecutionFactory.create(query, dataset)
@@ -253,7 +254,10 @@ object SparqlTestRunner {
           limit.foreach(n => query.setLimit(n))
         }
         val exec = queryExecution(query)
-        System.out.println(s"Running query $f")
+        logger.debug(s"Running query $f")
+        logger.whenDebugEnabled {
+          exec.getContext.set(ARQ.symLogExec, Explain.InfoLevel.ALL)
+        }
         try {
           if (query.isSelectType) {
             val results = exec.execSelect()
@@ -268,7 +272,7 @@ object SparqlTestRunner {
                 val expectedResults = new String(Files.readAllBytes(expect.toPath), StandardCharsets.UTF_8)
                 if (actualResults != expectedResults) {
                   failures += 1
-                  System.err.println(s"Testcase $comment\nExpected:\n$expectedResults\nActual:\n$actualResults")
+                  logger.warn(s"Testcase $comment\nExpected:\n$expectedResults\nActual:\n$actualResults")
                   <failure message="Constraint violated">
                     {PCData(s"Expected:\n$expectedResults\nGot:\n$actualResults")}
                   </failure>
@@ -277,7 +281,7 @@ object SparqlTestRunner {
                 // assume there should be no results
                 if (nonEmptyResults) {
                   failures += 1
-                  System.err.println(s"Testcase $comment\nExpected empty result set, got:\n$actualResults")
+                  logger.warn(s"Testcase $comment\nExpected empty result set, got:\n$actualResults")
                   <failure message="Constraint violated">
                     {PCData(s"Expected empty result set, got:\n$actualResults")}
                   </failure>
@@ -290,13 +294,13 @@ object SparqlTestRunner {
             testCases = testCases ++ <testcase name={comment} classname={className} time={timeTaken.toString}>
               {if (result) {
                 failures += 1
-                System.err.println(s"Testcase $comment\nExpected ASK query to return FALSE")
+                logger.warn(s"Testcase $comment\nExpected ASK query to return FALSE")
                 <failure message={"Constraint violated"}>Expected ASK query to return FALSE</failure>
               }}
             </testcase>
           } else {
             skipped += 1
-            System.out.println(s"Skipped testcase $comment")
+            logger.warn(s"Skipped testcase $comment")
             testCases = testCases ++ <testcase name={comment} classname={className}>
               <skipped/>
             </testcase>
