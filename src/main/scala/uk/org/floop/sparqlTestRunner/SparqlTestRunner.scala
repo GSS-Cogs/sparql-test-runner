@@ -129,7 +129,7 @@ object SparqlTestRunner {
   def parseArgs(args: Array[String]): (Query => QueryExecution, Config, Seq[File]) = {
     parser.parse(args, Config()) match {
       case Some(config) =>
-        val queryExecution: Query => QueryExecution = (query: Query) => {
+        val queryExecution: Query => QueryExecution = {
           val exec = config.endpoint match {
             case Some(uri) =>
               // Querying a remote endpoint; if authentication is required, need to set up pre-emptive auth,
@@ -147,15 +147,15 @@ object SparqlTestRunner {
                   context.setCredentialsProvider(credsProvider)
                   context.setAuthCache(authCache)
                   val client = HttpClients.custom.build()
-                  QueryExecutionFactory.sparqlService(uri.toString, query, client, context)
+                  (query: Query) => QueryExecutionFactory.sparqlService(uri.toString, query, client, context)
                 case Some(Right(token)) =>
                   val authHeader = new BasicHeader(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                   val headers = new util.ArrayList[BasicHeader]
                   headers.add(authHeader)
                   val client = HttpClients.custom.setDefaultHeaders(headers).build()
-                  QueryExecutionFactory.sparqlService(uri.toString, query, client)
+                  (query: Query) => QueryExecutionFactory.sparqlService(uri.toString, query, client)
                 case None =>
-                  QueryExecutionFactory.sparqlService(uri.toString, query)
+                  (query: Query) => QueryExecutionFactory.sparqlService(uri.toString, query)
               }
             case None =>
               val dataset = DatasetFactory.create
@@ -163,7 +163,7 @@ object SparqlTestRunner {
                 println(s"Loading $d")
                 RDFDataMgr.read(dataset, d.toString)
               }
-              QueryExecutionFactory.create(query, dataset)
+              (query: Query) => QueryExecutionFactory.create(query, dataset)
           }
           // if this is an HTTP executor, then we can add the FROM graphs as part of the protocol
           exec match {
