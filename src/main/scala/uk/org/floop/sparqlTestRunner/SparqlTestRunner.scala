@@ -46,6 +46,7 @@ case class Config(dirs: List[File] = List.empty,
                   params: Map[String, String] = Map.empty,
                   froms: List[String] = List.empty,
                   limit: Option[Int] = None,
+                  maxTime: Option[Int] = None,
                   data: Seq[File] = Seq())
 
 object SparqlTestRunner extends LazyLogging {
@@ -99,6 +100,11 @@ object SparqlTestRunner extends LazyLogging {
       .valueName("<max>")
       .action((x, c) => c.copy(limit = Some(x)))
       .text("limit the number of results (examples of failure) to return")
+    opt[Int]('m', name = "maxtime")
+      .optional()
+      .valueName("<seconds>")
+      .action((x, c) => c.copy(maxTime = Some(x)))
+      .text("set queries (on local data) to timeout after this many seconds")
     arg[File]("<file>...")
       .unbounded()
       .optional()
@@ -131,7 +137,7 @@ object SparqlTestRunner extends LazyLogging {
     parser.parse(args, Config()) match {
       case Some(config) =>
         val queryExecution: Query => QueryExecution = {
-          val exec = config.endpoint match {
+          val execForQuery: (Query => QueryExecution) = config.endpoint match {
             case Some(uri) =>
               // Querying a remote endpoint; if authentication is required, need to set up pre-emptive auth,
               // see https://hc.apache.org/httpcomponents-client-ga/tutorial/html/authentication.html
@@ -166,14 +172,22 @@ object SparqlTestRunner extends LazyLogging {
               }
               (query: Query) => QueryExecutionFactory.create(query, dataset)
           }
-          // if this is an HTTP executor, then we can add the FROM graphs as part of the protocol
-          exec match {
-            case httpExec: QueryEngineHTTP =>
-              for (g <- config.froms) {
-                httpExec.addDefaultGraph(g)
-              }
-              httpExec
-            case other => other
+          // Add query timeout, FROMs, etc.
+          (query: Query) => {
+            val exec = execForQuery(query)
+            config.maxTime match {
+              case Some(t) => exec.setTimeout(t * 1000)
+              case None =>
+            }
+            // if this is an HTTP executor, then we can add the FROM graphs as part of the protocol
+            exec match {
+              case httpExec: QueryEngineHTTP =>
+                for (g <- config.froms) {
+                  httpExec.addDefaultGraph(g)
+                }
+              case _ =>
+            }
+            exec
           }
         }
         (queryExecution, config, config.dirs match {
