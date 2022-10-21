@@ -4,7 +4,7 @@ ThisBuild / scalaVersion := "2.13.4"
 ThisBuild / organizationName := "Alex Tucker"
 
 lazy val sparqlTestRunner = (project in file("."))
-  .enablePlugins(NativeImagePlugin)
+  .enablePlugins(NativeImagePlugin, JavaAppPackaging)
   .settings(
     name := "sparql-test-runner",
     version := "1.4",
@@ -43,4 +43,4 @@ lazy val sparqlTestRunner = (project in file("."))
     mainClass in assembly := Some("uk.org.floop.sparqlTestRunner.SparqlTestRunner"),
     assemblyOption in assembly := (assemblyOption in assembly).value.copy(prependShellScript = Some(defaultShellScript)),
     assemblyJarName in assembly := "sparql-test-runner"
-)
+  )
